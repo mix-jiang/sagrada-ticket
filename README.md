@@ -8,7 +8,19 @@
 
 ---
 
-## 快速开始
+## 一键启动
+
+确保已安装 [Node.js v18+](https://nodejs.org)，然后在终端粘贴：
+
+```bash
+git clone https://github.com/mix-jiang/sagrada-ticket.git && cd sagrada-ticket && npm install && npx playwright install chromium && npm run setup
+```
+
+命令会自动完成克隆、安装、配置向导，全程引导输入购票信息。
+
+---
+
+## 快速开始（分步说明）
 
 ### 1. 前置条件
 
