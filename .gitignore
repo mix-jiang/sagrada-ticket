@@ -4,3 +4,4 @@ tmp/
 *.png
 *.html
 .DS_Store
+config.yaml

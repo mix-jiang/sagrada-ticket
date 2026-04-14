@@ -3,77 +3,15 @@
  * Interactive setup wizard for config.yaml.
  * Run via:  npm run setup
  *
- * Prompts the user for every required field, shows current config.yaml values
- * as defaults (if the file already exists), then writes the result.
+ * Uses @inquirer/prompts for arrow-key selection, checkboxes, and validation.
  */
 import fs from "node:fs";
 import path from "node:path";
-import readline from "node:readline";
+import { input, select, checkbox, confirm } from "@inquirer/prompts";
 import YAML from "yaml";
 
 const CONFIG_PATH = path.resolve(process.cwd(), "config.yaml");
 const EXAMPLE_PATH = path.resolve(process.cwd(), "config.example.yaml");
-
-// ── helpers ──────────────────────────────────────────────────────────────────
-
-function rl() {
-  return readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
-}
-
-function ask(iface, question) {
-  return new Promise((resolve) => iface.question(question, (answer) => resolve(answer.trim())));
-}
-
-async function prompt(iface, label, defaultValue, hint = "") {
-  const defaultDisplay = defaultValue !== undefined && defaultValue !== "" ? ` [${defaultValue}]` : "";
-  const hintDisplay = hint ? ` (${hint})` : "";
-  const answer = await ask(iface, `${label}${hintDisplay}${defaultDisplay}: `);
-  return answer === "" && defaultValue !== undefined ? String(defaultValue) : answer;
-}
-
-async function promptInt(iface, label, defaultValue) {
-  while (true) {
-    const raw = await prompt(iface, label, defaultValue, "number");
-    const n = Number(raw);
-    if (Number.isInteger(n) && n > 0) return n;
-    console.log("  ⚠  Please enter a positive integer.");
-  }
-}
-
-async function promptDate(iface, label, defaultValue) {
-  while (true) {
-    const raw = await prompt(iface, label, defaultValue, "YYYY-MM-DD");
-    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
-    console.log("  ⚠  Format must be YYYY-MM-DD (e.g. 2026-06-15).");
-  }
-}
-
-async function promptEmail(iface, label, defaultValue) {
-  while (true) {
-    const raw = await prompt(iface, label, defaultValue);
-    if (raw.includes("@") && raw.includes(".")) return raw;
-    console.log("  ⚠  Please enter a valid email address.");
-  }
-}
-
-async function promptPassengers(iface, quantity, existing) {
-  const passengers = [];
-  for (let i = 0; i < quantity; i++) {
-    const ex = existing?.[i] ?? {};
-    console.log(`\n  Passenger ${i + 1} of ${quantity}`);
-    const firstName = (await prompt(iface, "    First name (as in passport/ID)", ex.firstName ?? "")).toUpperCase();
-    const lastName = (await prompt(iface, "    Last name  (as in passport/ID)", ex.lastName ?? "")).toUpperCase();
-    const email = await promptEmail(iface, "    Email address", ex.email !== "passenger1@example.com" && ex.email !== "your@email.com" ? ex.email : "");
-    const documentId = await prompt(iface, "    Document number (passport/ID)", ex.documentId !== "P00000001" && ex.documentId !== "P00000002" ? ex.documentId : "");
-    const docTypeRaw = await prompt(iface, "    Document type", ex.documentType ?? "passport", "passport / id");
-    const documentType = ["id", "passport"].includes(docTypeRaw.toLowerCase()) ? docTypeRaw.toLowerCase() : "passport";
-    passengers.push({ firstName, lastName, email, documentId, documentType });
-  }
-  return passengers;
-}
 
 // ── load existing or example config as defaults ───────────────────────────────
 
@@ -87,64 +25,264 @@ function loadBase() {
   }
 }
 
+// ── field prompts ─────────────────────────────────────────────────────────────
+
+async function askDate(defaultValue) {
+  return input({
+    message: "Visit date",
+    default: defaultValue,
+    validate(value) {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return true;
+      return "Format must be YYYY-MM-DD (e.g. 2026-06-15)";
+    },
+  });
+}
+
+async function askQuantity(defaultValue) {
+  return select({
+    message: "Number of tickets",
+    default: String(defaultValue ?? 2),
+    choices: [1, 2, 3, 4, 5, 6].map((n) => ({ value: n, name: String(n) })),
+  });
+}
+
+async function askTicketCategory(defaultValue) {
+  const KNOWN = [
+    { value: "under 30 years old", name: "Under 30 years old" },
+    { value: "adult", name: "Adult" },
+    { value: "senior", name: "Senior (65+)" },
+    { value: "child", name: "Child" },
+    { value: "__custom__", name: "Custom (type manually)…" },
+  ];
+  const isKnown = KNOWN.some((c) => c.value === defaultValue);
+  const selected = await select({
+    message: "Ticket category",
+    default: isKnown ? defaultValue : "__custom__",
+    choices: KNOWN,
+  });
+  if (selected !== "__custom__") return selected;
+  return input({
+    message: "Custom ticket category",
+    default: isKnown ? undefined : defaultValue,
+    validate(v) {
+      return v.trim().length > 0 ? true : "Please enter a category";
+    },
+  });
+}
+
+const TIME_SLOT_OPTIONS = [
+  { value: "09:00-13:00", name: "Morning   09:00–13:00" },
+  { value: "13:00-17:00", name: "Afternoon 13:00–17:00" },
+  { value: "17:00-20:00", name: "Evening   17:00–20:00" },
+];
+
+async function askPreferredTimes(defaultValue) {
+  const all = TIME_SLOT_OPTIONS.map((o) => o.value);
+  const defaultChecked = (defaultValue ?? all).filter((v) =>
+    all.includes(v),
+  );
+  const chosen = await checkbox({
+    message: "Preferred time windows  (Space to toggle, Enter to confirm; leave empty = all)",
+    choices: TIME_SLOT_OPTIONS.map((o) => ({
+      ...o,
+      checked: defaultChecked.includes(o.value),
+    })),
+  });
+  return chosen.length > 0 ? chosen : [...all];
+}
+
+async function askPassenger(index, total, existing = {}) {
+  console.log(`\n  Passenger ${index + 1} of ${total}`);
+  const firstName = (
+    await input({
+      message: "    First name (as in passport/ID)",
+      default: existing.firstName ?? "",
+      validate(v) { return v.trim().length > 0 ? true : "Required"; },
+    })
+  ).toUpperCase();
+
+  const lastName = (
+    await input({
+      message: "    Last name  (as in passport/ID)",
+      default: existing.lastName ?? "",
+      validate(v) { return v.trim().length > 0 ? true : "Required"; },
+    })
+  ).toUpperCase();
+
+  const placeholderEmails = ["passenger1@example.com", "your@email.com"];
+  const emailDefault = placeholderEmails.includes(existing.email) ? "" : (existing.email ?? "");
+  const email = await input({
+    message: "    Email address",
+    default: emailDefault,
+    validate(v) {
+      return v.includes("@") && v.includes(".") ? true : "Please enter a valid email address";
+    },
+  });
+
+  const placeholderDocs = ["P00000001", "P00000002"];
+  const docDefault = placeholderDocs.includes(existing.documentId) ? "" : (existing.documentId ?? "");
+  const documentId = await input({
+    message: "    Document number (passport / ID)",
+    default: docDefault,
+    validate(v) { return v.trim().length > 0 ? true : "Required"; },
+  });
+
+  const documentType = await select({
+    message: "    Document type",
+    default: existing.documentType ?? "passport",
+    choices: [
+      { value: "passport", name: "Passport" },
+      { value: "id", name: "National ID" },
+    ],
+  });
+
+  return { firstName, lastName, email, documentId, documentType };
+}
+
+async function askPassengers(quantity, existingList = []) {
+  const passengers = [];
+  for (let i = 0; i < quantity; i++) {
+    passengers.push(await askPassenger(i, quantity, existingList[i]));
+  }
+  return passengers;
+}
+
+// ── summary printer ───────────────────────────────────────────────────────────
+
+function printSummary(data) {
+  const { date, quantity, ticketCategory, preferredTimes, passengers, pauseBeforePayment } = data;
+  console.log("\n┌─────────────────────────────────────────────────────┐");
+  console.log("│                   Configuration                     │");
+  console.log("├─────────────────────────────────────────────────────┤");
+  console.log(`│  Visit date        : ${date}`);
+  console.log(`│  Tickets           : ${quantity}`);
+  console.log(`│  Category          : ${ticketCategory}`);
+  console.log(`│  Time windows      : ${preferredTimes.join(", ")}`);
+  console.log(`│  Pause before pay  : ${pauseBeforePayment ? "yes" : "no"}`);
+  console.log("├─────────────────────────────────────────────────────┤");
+  passengers.forEach((p, i) => {
+    console.log(`│  Passenger ${i + 1}       : ${p.firstName} ${p.lastName}`);
+    console.log(`│    email           : ${p.email}`);
+    console.log(`│    document        : ${p.documentId} (${p.documentType})`);
+  });
+  console.log("└─────────────────────────────────────────────────────┘\n");
+}
+
+// ── edit-field loop ───────────────────────────────────────────────────────────
+
+async function editField(data) {
+  const passengerChoices = data.passengers.flatMap((p, i) => [
+    { value: `p${i}_firstName`, name: `Passenger ${i + 1} — First name  (${p.firstName})` },
+    { value: `p${i}_lastName`, name: `Passenger ${i + 1} — Last name   (${p.lastName})` },
+    { value: `p${i}_email`, name: `Passenger ${i + 1} — Email       (${p.email})` },
+    { value: `p${i}_documentId`, name: `Passenger ${i + 1} — Document ID (${p.documentId})` },
+    { value: `p${i}_documentType`, name: `Passenger ${i + 1} — Doc type    (${p.documentType})` },
+  ]);
+
+  const field = await select({
+    message: "Which field do you want to edit?",
+    choices: [
+      { value: "date", name: `Visit date        (${data.date})` },
+      { value: "quantity", name: `Ticket count      (${data.quantity})` },
+      { value: "ticketCategory", name: `Ticket category   (${data.ticketCategory})` },
+      { value: "preferredTimes", name: `Time windows      (${data.preferredTimes.join(", ")})` },
+      { value: "pauseBeforePayment", name: `Pause before pay  (${data.pauseBeforePayment ? "yes" : "no"})` },
+      ...passengerChoices,
+    ],
+  });
+
+  if (field === "date") {
+    data.date = await askDate(data.date);
+  } else if (field === "quantity") {
+    const newQty = await askQuantity(data.quantity);
+    if (newQty !== data.quantity) {
+      data.quantity = newQty;
+      // re-ask all passengers to match new count
+      data.passengers = await askPassengers(data.quantity, data.passengers);
+    }
+  } else if (field === "ticketCategory") {
+    data.ticketCategory = await askTicketCategory(data.ticketCategory);
+  } else if (field === "preferredTimes") {
+    data.preferredTimes = await askPreferredTimes(data.preferredTimes);
+  } else if (field === "pauseBeforePayment") {
+    data.pauseBeforePayment = await confirm({ message: "Pause before payment?", default: data.pauseBeforePayment });
+  } else {
+    // passenger field: p<i>_<fieldName>
+    const [pIdx, fieldName] = field.replace(/^p(\d+)_/, (_, i) => `${i} `).split(" ");
+    const i = Number(pIdx);
+    const p = data.passengers[i];
+    if (fieldName === "firstName") {
+      p.firstName = (await input({ message: "First name", default: p.firstName, validate: (v) => v.trim().length > 0 ? true : "Required" })).toUpperCase();
+    } else if (fieldName === "lastName") {
+      p.lastName = (await input({ message: "Last name", default: p.lastName, validate: (v) => v.trim().length > 0 ? true : "Required" })).toUpperCase();
+    } else if (fieldName === "email") {
+      p.email = await input({ message: "Email", default: p.email, validate: (v) => (v.includes("@") && v.includes(".") ? true : "Invalid email") });
+    } else if (fieldName === "documentId") {
+      p.documentId = await input({ message: "Document ID", default: p.documentId, validate: (v) => v.trim().length > 0 ? true : "Required" });
+    } else if (fieldName === "documentType") {
+      p.documentType = await select({ message: "Document type", default: p.documentType, choices: [{ value: "passport", name: "Passport" }, { value: "id", name: "National ID" }] });
+    }
+  }
+  return data;
+}
+
 // ── main ──────────────────────────────────────────────────────────────────────
 
 async function main() {
   const base = loadBase();
-  const iface = rl();
 
   console.log("\n╔══════════════════════════════════════════════╗");
   console.log("║   Sagrada Familia Ticket Monitor — Setup     ║");
   console.log("╚══════════════════════════════════════════════╝\n");
 
   if (fs.existsSync(CONFIG_PATH)) {
-    console.log("ℹ  config.yaml already exists. Press Enter to keep the current value,\n   or type a new one to override it.\n");
+    console.log("ℹ  config.yaml already exists. Existing values are shown as defaults.\n");
   }
 
-  // ── target ────────────────────────────────────────────────────────────────
+  // ── collect all fields ──────────────────────────────────────────────────────
   console.log("── Target ───────────────────────────────────────────");
-  const date = await promptDate(iface, "Visit date", base.target?.date);
-  const quantity = await promptInt(iface, "Number of tickets", base.target?.quantity ?? 2);
-  const ticketCategory = await prompt(
-    iface,
-    "Ticket category",
-    base.target?.ticketCategory ?? "under 30 years old",
-    'e.g. "under 30 years old" / "adult"',
-  );
+  const date = await askDate(base.target?.date);
+  const quantity = await askQuantity(base.target?.quantity ?? 2);
+  const ticketCategory = await askTicketCategory(base.target?.ticketCategory ?? "under 30 years old");
+  const preferredTimes = await askPreferredTimes(base.target?.preferredTimes);
 
-  console.log("\n  Preferred time windows (comma-separated, 24h, e.g. 10:30-13:00,13:00-16:00)");
-  const prefTimesDefault = (base.target?.preferredTimes ?? ["10:30-13:00", "13:00-16:00", "16:00-19:30"]).join(",");
-  const prefTimesRaw = await prompt(iface, "  Preferred times", prefTimesDefault);
-  const preferredTimes = prefTimesRaw.split(",").map((s) => s.trim()).filter(Boolean);
-
-  // ── passengers ────────────────────────────────────────────────────────────
   console.log("\n── Passengers ───────────────────────────────────────");
-  const passengers = await promptPassengers(iface, quantity, base.passengers);
+  let passengers = await askPassengers(quantity, base.passengers);
 
-  // ── checkout safety ───────────────────────────────────────────────────────
   console.log("\n── Checkout safety ──────────────────────────────────");
-  const pauseRaw = await prompt(
-    iface,
-    "Pause before payment for manual review?",
-    base.checkout?.pauseBeforePayment !== false ? "yes" : "no",
-    "yes / no",
-  );
-  const pauseBeforePayment = !["no", "n", "false"].includes(pauseRaw.toLowerCase());
+  let pauseBeforePayment = await confirm({
+    message: "Pause before payment for manual review?",
+    default: base.checkout?.pauseBeforePayment !== false,
+  });
 
-  iface.close();
+  // ── confirm / edit loop ─────────────────────────────────────────────────────
+  let data = { date, quantity, ticketCategory, preferredTimes, passengers, pauseBeforePayment };
 
-  // ── build config ──────────────────────────────────────────────────────────
+  while (true) {
+    printSummary(data);
+    const action = await select({
+      message: "Everything looks correct?",
+      choices: [
+        { value: "save", name: "✅  Yes, save and continue" },
+        { value: "edit", name: "✏️   Edit a field…" },
+      ],
+    });
+    if (action === "save") break;
+    data = await editField(data);
+  }
+
+  // ── build config ────────────────────────────────────────────────────────────
   const config = {
     target: {
       name: base.target?.name ?? "Sagrada Familia",
-      date,
+      date: data.date,
       locale: base.target?.locale ?? "en",
       url: base.target?.url ?? "https://tickets.sagradafamilia.org/en/1-individual/4375-sagrada-familia",
       timezone: base.target?.timezone ?? "Europe/Madrid",
-      quantity,
-      ticketCategory,
+      quantity: data.quantity,
+      ticketCategory: data.ticketCategory,
       ticketPreference: base.target?.ticketPreference ?? ["tower", "guided", "basic"],
-      preferredTimes,
+      preferredTimes: data.preferredTimes,
       unavailableKeywords: base.target?.unavailableKeywords ?? [
         "sold out",
         "not available",
@@ -168,13 +306,13 @@ async function main() {
     checkout: {
       ...(base.checkout ?? {}),
       enabled: true,
-      pauseBeforePayment,
+      pauseBeforePayment: data.pauseBeforePayment,
       proceedToPayment: false,
       keepBrowserOpenOnError: true,
       finalConfirmationSelector: "",
       screenshotDir: "./artifacts",
     },
-    passengers,
+    passengers: data.passengers,
     selectors: base.selectors ?? {
       cookieAccept: ["button:has-text('Accept')", "button:has-text('OK')"],
       productCards: ["article", ".card", "[data-product]"],

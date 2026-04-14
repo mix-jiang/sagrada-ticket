@@ -77,16 +77,39 @@ async function fetchAccessToken() {
 export async function runApiMonitorLoop(config, options = {}) {
   const intervalSeconds = options.intervalSeconds ?? 5;
   let previousState = null;
+  let pollCount = 0;
+
+  // Width of the last status line written (for clean \r overwrite)
+  let lastLineLength = 0;
+
+  function writeStatusLine(line) {
+    // Pad with spaces to overwrite any longer previous line
+    const padded = line.padEnd(lastLineLength, " ");
+    process.stdout.write(`\r${padded}`);
+    lastLineLength = line.length;
+  }
+
+  function clearStatusLine() {
+    process.stdout.write(`\r${" ".repeat(lastLineLength)}\r`);
+    lastLineLength = 0;
+  }
 
   while (true) {
+    pollCount++;
     try {
       const result = await runApiCheckOnce(config);
+      const now = new Date().toLocaleTimeString("en-GB", { hour12: false });
+
       if (result.state !== previousState) {
-        logInfo(`API state changed for ${result.targetDate}: ${result.state}`);
+        // State changed — clear the status line and print a full log entry
+        clearStatusLine();
+        logInfo(`API state changed for ${result.targetDate}: ${previousState ?? "—"} → ${result.state}`);
         previousState = result.state;
       }
 
       if (result.available) {
+        clearStatusLine();
+        console.log(`\n✅  TICKETS AVAILABLE for ${result.targetDate}! Starting checkout…\n`);
         await sendNotification(config, {
           title: `${config.target.name} available via API`,
           date: result.targetDate,
@@ -95,7 +118,12 @@ export async function runApiMonitorLoop(config, options = {}) {
         });
         return result;
       }
+
+      // Normal tick — overwrite the status line in place
+      const statusLine = `⏳  Monitoring ${result.targetDate} · Poll #${pollCount} · Last checked ${now} · ${result.state}`;
+      writeStatusLine(statusLine);
     } catch (error) {
+      clearStatusLine();
       logWarn("API monitor iteration failed.", error.message);
     }
 
