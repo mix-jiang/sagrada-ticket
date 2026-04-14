@@ -1,0 +1,152 @@
+# ============================================================
+# Sagrada Familia Ticket Monitor — Configuration Template
+# ============================================================
+# Copy this file to config.yaml, then fill in your details.
+# Or run `npm run setup` for an interactive setup wizard.
+# ============================================================
+
+target:
+  # Full name of the attraction (used in notifications only)
+  name: "Sagrada Familia"
+
+  # The date you want tickets for (YYYY-MM-DD)
+  date: "YYYY-MM-DD"
+
+  # Page locale: "en" | "es" | "ca"
+  locale: "en"
+
+  # Direct product page URL (leave as-is for standard entry tickets)
+  url: "https://tickets.sagradafamilia.org/en/1-individual/4375-sagrada-familia"
+
+  # Timezone used for date display in logs
+  timezone: "Europe/Madrid"
+
+  # How many tickets to buy
+  quantity: 2
+
+  # Ticket category label (must match text shown on site, case-insensitive)
+  # Examples: "under 30 years old" | "general admission" | "adult"
+  ticketCategory: "under 30 years old"
+
+  # Time slot preferences (in order of priority); earliest available wins
+  ticketPreference:
+    - "tower"
+    - "guided"
+    - "basic"
+
+  preferredTimes:
+    - "10:30-13:00"
+    - "13:00-16:00"
+    - "16:00-19:30"
+
+  # Keywords that indicate a slot is sold out (matched against button text)
+  unavailableKeywords:
+    - "sold out"
+    - "not available"
+    - "agotado"
+    - "no disponible"
+
+# ── Monitoring ───────────────────────────────────────────────────────────────
+monitor:
+  # Seconds between API availability polls
+  intervalSeconds: 45
+
+  # Run browser in background (true) or visible window (false)
+  headless: true
+
+  # Page load timeout in ms
+  timeoutMs: 20000
+
+  # Stop monitoring after first successful checkout trigger
+  stopAfterSuccess: false
+
+  # Save raw HTML when availability is detected
+  saveHtmlOnMatch: true
+
+  # Save screenshots at key checkout steps
+  saveScreenshots: true
+
+# ── Notifications ─────────────────────────────────────────────────────────────
+notifications:
+  # Print status to terminal
+  console: true
+
+  # Show desktop notification (macOS / Linux with notify-send)
+  desktop: true
+
+  # Optional: POST JSON to this URL on key events (Slack, Discord webhook, etc.)
+  webhookUrl: ""
+
+# ── Checkout ──────────────────────────────────────────────────────────────────
+checkout:
+  # Enable auto-checkout when availability is detected
+  enabled: true
+
+  # SAFETY: stop before clicking Pay so you can review the order in the browser
+  pauseBeforePayment: true
+
+  # Set to true only if you want fully hands-off payment — use with caution
+  proceedToPayment: false
+
+  # Keep browser open on error for manual inspection
+  keepBrowserOpenOnError: true
+
+  # Advanced: wait for this CSS selector before considering checkout complete
+  finalConfirmationSelector: ""
+
+  # Directory where checkout screenshots are saved
+  screenshotDir: "./artifacts"
+
+# ── Passengers ────────────────────────────────────────────────────────────────
+# Add one entry per ticket. Names must exactly match your ID document.
+passengers:
+  - firstName: "FIRSTNAME1"
+    lastName: "LASTNAME1"
+    email: "passenger1@example.com"
+    documentId: "P00000001"
+    documentType: "passport"   # "passport" | "id"
+  - firstName: "FIRSTNAME2"
+    lastName: "LASTNAME2"
+    email: "passenger2@example.com"
+    documentId: "P00000002"
+    documentType: "passport"
+
+# ── Selectors (advanced — only edit if the site layout changes) ───────────────
+selectors:
+  cookieAccept:
+    - "button:has-text('Accept')"
+    - "button:has-text('OK')"
+  productCards:
+    - "article"
+    - ".card"
+    - "[data-product]"
+  timeSlotButtons:
+    - "button"
+    - "[role='button']"
+  travellerFields:
+    firstName: "input[name='firstName']"
+    lastName: "input[name='lastName']"
+    email: "input[name='email']"
+    documentId: "input[name='document']"
+  proceedToPayment:
+    - "button:has-text('Pay')"
+    - "button:has-text('Checkout')"
+
+# ── Flows (advanced — only edit if you need a custom step sequence) ───────────
+flows:
+  monitor:
+    - type: "goto"
+      url: "{{target.url}}"
+    - type: "optionalClickAny"
+      selectors: "{{selectors.cookieAccept}}"
+    - type: "capturePageText"
+    - type: "detectAvailability"
+  checkout:
+    - type: "goto"
+      url: "{{target.url}}"
+    - type: "optionalClickAny"
+      selectors: "{{selectors.cookieAccept}}"
+    - type: "pickProductCard"
+    - type: "pickPreferredTime"
+    - type: "fillPassengers"
+    - type: "handoffBeforePayment"

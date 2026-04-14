@@ -1,0 +1,6 @@
+node_modules/
+artifacts/
+tmp/
+*.png
+*.html
+.DS_Store

@@ -1,0 +1,28 @@
+{
+  "name": "playground",
+  "version": "1.0.0",
+  "description": "Ticket monitoring and semi-automated checkout helper for Sagrada Familia.",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "setup": "node src/setup.js",
+    "once": "node src/index.js once",
+    "once-api": "node src/index.js once-api",
+    "monitor": "node src/index.js monitor",
+    "watch-fast": "node src/index.js watch-fast",
+    "watch-api-fast": "node src/index.js watch-api-fast",
+    "checkout": "node src/index.js checkout",
+    "inspect-api": "node src/index.js inspect-api"
+  },
+  "keywords": [
+    "playwright",
+    "tickets",
+    "automation"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "playwright": "^1.59.1",
+    "yaml": "^2.8.3"
+  }
+}
